@@ -1,0 +1,114 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/",
+]
+
+[project]
+authors = [
+  {name = "Evgenii Moryakhin", email = "eamoryakhin@basistech.ru"},
+]
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Programming Language :: Python",
+]
+dependencies = [
+  "saq>=0.13.2",
+  "typing-extensions>=4.12.2",
+  "anyio>=4.4.0",
+  "exceptiongroup>=1.2.1",
+  "motor>=3.5.0",
+  "pydantic>=2.8.2",
+  "redis>=5.0.7",
+  "dill>=0.3.8",
+]
+description = "Simple workflow library"
+maintainers = [
+  {name = "Evgenii Moryakhin", email = "evgenii.moriakhin@gmail.com"},
+]
+name = "sflows"
+readme = "README.md"
+version = "0.1.0"
+
+[project.urls]
+Repository = "https://github.com/evgenii-moriakhin/sflows"
+
+[project.optional-dependencies]
+dev = [
+  "ruff==0.5.1",
+  "pyright==1.1.370",
+  "pytest",
+  "pytest-mock",
+  "types-redis",
+]
+
+[tool.pytest.ini_options]
+pythonpath = "src/" # for correct import resolution from tests
+
+[tool.pyright]
+typeCheckingMode = "strict"
+include = [
+  "src",
+  "tests",
+]
+extraPaths = [
+  "src/", 
+]
+pythonPlatform = "Linux"
+
+
+[tool.ruff]
+lint.select = [
+  "ALL",
+]
+
+lint.ignore = [
+  "A003", # flake8-builtins - class attribute {name} is shadowing a python builtin
+  "D100", # pydocstyle - missing docstring in public module
+  "D101", # pydocstyle - missing docstring in public class
+  "D102", # pydocstyle - missing docstring in public method
+  "D103", # pydocstyle - missing docstring in public function
+  "D104", # pydocstyle - missing docstring in public package
+  "D105", # pydocstyle - missing docstring in magic method
+  "D106", # pydocstyle - missing docstring in public nested class
+  "D107", # pydocstyle - missing docstring in __init__
+  "D202", # pydocstyle - no blank lines allowed after function docstring
+  "D205", # pydocstyle - 1 blank line required between summary line and description
+  "D415", # pydocstyle - first line should end with a period, question mark, or exclamation point
+  "ISC001", # Ruff formatter incompatible
+  "COM812", # Ruff formatter incompatible
+  "UP007", # Annotation for pydantic Base Model or msgspec Struct does not support some new typing syntax
+  "PGH003", # ability to ignore typing errors using type: ignore
+]
+line-length = 120
+src = [
+  "src",
+  "tests",
+]
+target-version = "py39"
+output-format = "full"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+  "S101", # to use assertions in tests is necessary
+  "PLR2004", # magic values in tests are allowed
+  "ANN", # annotations in tests are optional
+  "ARG002", # unused arguments in tests can be
+  "PLR0913", # too many arguments allowed in tests
+  "SLF001", # private access in tests are allowed
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "sflows",
+  "tests",
+]
