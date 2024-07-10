@@ -356,7 +356,7 @@ async def test_single_request_stage_inside_workflow_success(task_group: TaskGrou
         assert stage["task"].function == SimpleActivityRequest.name()
         assert stage["task"].status == "complete"
         assert stage["task"].result == "success"
-        assert stage["task"].causation_id == "1"
+        assert stage["task"].causation_id == task.key
         assert stage["task"].correlation_id == "1"
     finally:
         await manager.shutdown()
@@ -419,7 +419,7 @@ async def test_single_request_stage_inside_workflow_error(task_group: TaskGroup)
         assert stage["task"].function == SimpleActivityRequest.name()
         assert stage["task"].status == "failed"
         assert stage["task"].result is None
-        assert stage["task"].causation_id == "1"
+        assert stage["task"].causation_id == task.key
         assert stage["task"].correlation_id == "1"
     finally:
         await manager.shutdown()
@@ -486,7 +486,7 @@ async def test_multiple_nested_parallel_request_stages_inside_workflow_success(t
         assert first_request_stage["task"].function == SimpleActivityRequest.name()
         assert first_request_stage["task"].status == "complete"
         assert first_request_stage["task"].result == "success"
-        assert first_request_stage["task"].causation_id == "1"
+        assert first_request_stage["task"].causation_id == task.key
         assert first_request_stage["task"].correlation_id == "1"
 
         assert second_request_stage["name"] == "group_requests_stage.activity_request_stage2"
@@ -500,7 +500,7 @@ async def test_multiple_nested_parallel_request_stages_inside_workflow_success(t
         assert second_request_stage["task"].function == SimpleActivityRequest.name()
         assert second_request_stage["task"].status == "complete"
         assert second_request_stage["task"].result == "success"
-        assert second_request_stage["task"].causation_id == "1"
+        assert second_request_stage["task"].causation_id == task.key
         assert second_request_stage["task"].correlation_id == "1"
 
         assert third_request_stage["name"] == "group_requests_stage.activity_request_stage3"
@@ -514,7 +514,7 @@ async def test_multiple_nested_parallel_request_stages_inside_workflow_success(t
         assert third_request_stage["task"].function == SimpleActivityRequest.name()
         assert third_request_stage["task"].status == "complete"
         assert third_request_stage["task"].result == "success"
-        assert third_request_stage["task"].causation_id == "1"
+        assert third_request_stage["task"].causation_id == task.key
         assert third_request_stage["task"].correlation_id == "1"
     finally:
         await manager.shutdown()

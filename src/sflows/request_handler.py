@@ -97,13 +97,13 @@ class TaskExecutionContext(Generic[_T_request_payload, _T_request_result]):
     def is_last_attempt(self: Self) -> bool:
         return self.current_attempt == "compensate_attempt" or self.current_attempt >= self.task.retries
 
-    async def heartbeat(self: Self, request: str) -> None:
-        self.add_heartbeat(request)
+    async def heartbeat(self: Self, message: str) -> None:
+        self.add_heartbeat(message)
         await self.update_task()
 
-    def add_heartbeat(self: Self, request: str) -> None:
+    def add_heartbeat(self: Self, message: str) -> None:
         self.task.heartbeats_history.append(
-            Heartbeat(attempt=self.current_attempt, timestamp=int(time.time()), message=request)
+            Heartbeat(attempt=self.current_attempt, timestamp=int(time.time()), message=message)
         )
 
     async def check_pause(self: Self, pause_error_desc: str = "Pause event was set") -> None:
@@ -391,7 +391,7 @@ class AsyncRequestHandler(ABC, Generic[_T_request_payload, _T_request_result]):
             task = await self.task_manager.send_request(
                 request_cls(
                     correlation_id=self.request_context.correlation_id,
-                    causation_id=self.request_context.causation_id,
+                    causation_id=self.request_context.request_id,
                     payload=payload,
                 ),
                 queue,
