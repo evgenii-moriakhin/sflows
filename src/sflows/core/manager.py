@@ -293,7 +293,10 @@ class AsyncTaskManager:
                 if not task.completed or (task.need_compensate and task.compensation_status != "paused"):
                     while True:
                         try:
-                            if task.completed and ((task.need_compensate and task.compensation_status == "paused") or not task.need_compensate):
+                            if task.completed and (
+                                (task.need_compensate and task.compensation_status == "paused")
+                                or not task.need_compensate
+                            ):
                                 break
                             await self.refresh_task(task, 1)
                         except asyncio_exceptions.TimeoutError:
