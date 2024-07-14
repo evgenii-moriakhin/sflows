@@ -311,14 +311,14 @@ class AsyncTaskManager:
             if task.paused:
                 raise PausedError(task.error or "paused by unknown reason")
             raise AbortedError(task.error or "unknown aborted error")
-        if task.status in UNSUCCESSFUL_TERMINAL_STATUSES:
-            raise UnprocessedError(task.error or "unknown unprocessed error")
         if task.compensation_status == "complete":
             raise CompensatedSuccess(task.error or "compensate error was success")
         if task.compensation_status == "paused":
             raise PausedError(task.compensation_error or "compensation paused by unknown reason")
         if task.compensation_status == "failed":
             raise CompensatedError(task.compensation_error or "unknown compensated error")
+        if task.status in UNSUCCESSFUL_TERMINAL_STATUSES:
+            raise UnprocessedError(task.error or "unknown unprocessed error")
         return task.result
 
     async def await_task_completion_and_get_validated_result(self: Self, task: AsyncTask, timeout: int = 0) -> Any:  # noqa: ANN401
