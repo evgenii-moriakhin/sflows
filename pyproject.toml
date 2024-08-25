@@ -16,7 +16,7 @@ classifiers = [
   "Programming Language :: Python",
 ]
 dependencies = [
-  "saq>=0.13.2",
+  "saq==0.13.2",
   "typing-extensions>=4.12.2",
   "anyio>=4.4.0",
   "exceptiongroup>=1.2.1",

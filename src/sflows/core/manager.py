@@ -279,8 +279,9 @@ class AsyncTaskManager:
                     print(error)
 
     async def shutdown(self: Self) -> None:
+        # stop the worker first to correctly cancel and finish all tasks
+        await self._worker.stop()
         async with anyio.create_task_group() as shutdown_task_group:
-            shutdown_task_group.start_soon(self._worker.stop)
             for queue in self._all_queues.values():
                 shutdown_task_group.start_soon(queue.disconnect)
             shutdown_task_group.start_soon(self.pubsub.close)
@@ -373,7 +374,8 @@ class AsyncTaskManager:
                             if stage["task"]:
                                 # attempt to pause child tasks when receiving a pause event
                                 # if some of them are paused, the result will be processed by the corresponding stages
-                                await self.try_pause_task(stage["task"])
+                                with anyio.CancelScope(shield=True):
+                                    await self.try_pause_task(stage["task"])
                         stop_receiver = True
                 if stop_receiver:
                     break
@@ -387,10 +389,11 @@ class AsyncTaskManager:
             except BaseException as error:  # noqa: BLE001
                 task_processing_error = error
             finally:
-                stop_receiver = True
-                task_execution_context.set_pause_event(pause_event=False)
-                await task_execution_context.update_task()
-                await self.pubsub.unsubscribe(signals)  # type: ignore
+                with anyio.CancelScope(shield=True):
+                    stop_receiver = True
+                    task_execution_context.set_pause_event(pause_event=False)
+                    await task_execution_context.update_task()
+                    await self.pubsub.unsubscribe(signals)  # type: ignore
         if task_processing_error:
             raise task_processing_error
 
@@ -409,11 +412,30 @@ async def _worker_request_handler(  # noqa: PLR0913
     request_handler.logger = task_manager.logger
     request_model = request_cls.model_validate(request)
 
-    async with task_manager.task_execution_context(cast(AsyncTask, ctx["job"]), request_model) as request_context:  # type: ignore
-        request_handler.request_context = request_context
-        if request_context.task.need_compensate:
-            await process_compensate(request_handler)
-        return await process_request(request_handler)
+    result = None
+    processor_error = None
+
+    async def processor():
+        nonlocal result
+        nonlocal processor_error
+        try:
+            async with task_manager.task_execution_context(
+                cast(AsyncTask, ctx["job"]), request_model
+            ) as request_context:  # type: ignore
+                request_handler.request_context = request_context
+                if not request_context.task.need_compensate:
+                    result = await process_request(request_handler)
+                else:
+                    await process_compensate(request_handler)
+        except BaseException as error:
+            processor_error = error
+
+    async with anyio.create_task_group() as tg:
+        # start processing the request in anyio.task_group so that anyio.CancelScope shielded scopes work within it
+        tg.start_soon(processor)
+    if processor_error:
+        raise processor_error
+    return result
 
 
 async def process_request(
@@ -426,10 +448,12 @@ async def process_request(
             await request_handler.on_request_abort()
         raise
     except Exception as error:
-        processed_error = await request_handler.on_request_error(error)
+        with anyio.CancelScope(shield=True):
+            processed_error = await request_handler.on_request_error(error)
         raise processed_error from error
     finally:
-        await request_handler.request_context.update_task()
+        with anyio.CancelScope(shield=True):
+            await request_handler.request_context.update_task()
 
     return result
 
@@ -449,20 +473,22 @@ async def process_compensate(
             await request_handler.on_compensate_abort()
         raise
     except Exception as error:
-        if isinstance(error, PausedError):
-            request_handler.request_context.task.need_compensate = True
-            request_handler.request_context.task.compensation_status = "paused"
-            request_handler.request_context.task.compensation_error = str(error)
-        else:
-            request_handler.request_context.task.need_compensate = False
-            request_handler.request_context.task.compensation_status = "failed"
-            request_handler.request_context.task.compensation_error = str(error)
-        processed_error = await request_handler.on_compensate_error(error)
+        with anyio.CancelScope(shield=True):
+            if isinstance(error, PausedError):
+                request_handler.request_context.task.need_compensate = True
+                request_handler.request_context.task.compensation_status = "paused"
+                request_handler.request_context.task.compensation_error = str(error)
+            else:
+                request_handler.request_context.task.need_compensate = False
+                request_handler.request_context.task.compensation_status = "failed"
+                request_handler.request_context.task.compensation_error = str(error)
+            processed_error = await request_handler.on_compensate_error(error)
         raise processed_error from error
     else:
         raise CompensatedSuccess(request_handler.request_context.task.error)
     finally:
-        await request_handler.request_context.update_task()
+        with anyio.CancelScope(shield=True):
+            await request_handler.request_context.update_task()
 
 
 async def _after_process_task(task_manager: AsyncTaskManager, ctx: JobContext | None) -> None:
@@ -471,21 +497,20 @@ async def _after_process_task(task_manager: AsyncTaskManager, ctx: JobContext | 
 
     async_task = cast(AsyncTask, ctx["job"])  # type: ignore
 
-    with anyio.CancelScope(shield=True):
-        if async_task.status in UNSUCCESSFUL_TERMINAL_STATUSES and async_task.compensation_status == "failed":
-            # If the compensation handler has exhausted all its retries before the unsuccessful completion of the task,
-            # (UNSUCCESSFUL_TERMINAL_STATUSES) it means an error occurred during compensation.
-            async_task.heartbeats_history.append(
-                Heartbeat(attempt="compensate_attempt", timestamp=int(time.time()), message="Compensation failed")
-            )
-            await async_task.update()
+    if async_task.status in UNSUCCESSFUL_TERMINAL_STATUSES and async_task.compensation_status == "failed":
+        # If the compensation handler has exhausted all its retries before the unsuccessful completion of the task,
+        # (UNSUCCESSFUL_TERMINAL_STATUSES) it means an error occurred during compensation.
+        async_task.heartbeats_history.append(
+            Heartbeat(attempt="compensate_attempt", timestamp=int(time.time()), message="Compensation failed")
+        )
+        await async_task.update()
 
-        # try compensate
-        # these checks are also performed inside compensate_task.
-        # But we perform them here to reduce the number of operations and not use the compensate lock
-        if (
-            async_task.status in UNSUCCESSFUL_TERMINAL_STATUSES
-            and async_task.need_compensate
-            and async_task.compensation_status not in ["started", "complete", "paused"]
-        ):
-            await task_manager.compensate_task(async_task, force_need_compensate=False)
+    # try compensate
+    # these checks are also performed inside compensate_task.
+    # But we perform them here to reduce the number of operations and not use the compensate lock
+    if (
+        async_task.status in UNSUCCESSFUL_TERMINAL_STATUSES
+        and async_task.need_compensate
+        and async_task.compensation_status not in ["started", "complete", "paused"]
+    ):
+        await task_manager.compensate_task(async_task, force_need_compensate=False)

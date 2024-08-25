@@ -122,7 +122,8 @@ class StageManager(AbstractAsyncContextManager):  # type: ignore
         self.stage_name = stage_name
 
     async def __aenter__(self: Self) -> Stage:
-        return await copy_context().run(self._start_stage)
+        with anyio.CancelScope(shield=True):
+            return await copy_context().run(self._start_stage)
 
     async def _start_stage(self: Self) -> Stage:
         current_stage_prefix = ""
@@ -206,8 +207,8 @@ class StageManager(AbstractAsyncContextManager):  # type: ignore
         __exc_value: BaseException | None,
         __traceback: TracebackType | None,
     ) -> None:
-        if isinstance(__exc_value, anyio.get_cancelled_exc_class()):
-            with anyio.CancelScope(shield=True):
+        with anyio.CancelScope(shield=True):
+            if isinstance(__exc_value, anyio.get_cancelled_exc_class()):
                 self.current_stage["status"] = "aborted"
                 self.current_stage["error"] = "Stage aborted by cancellation"
                 if self.current_stage["task"]:
@@ -258,44 +259,44 @@ class StageManager(AbstractAsyncContextManager):  # type: ignore
                         self.current_stage["error"] = f"Stage failed by fail in task with id {task.key}: {task.error}"
                 self.stages_stack.pop()
                 await self.request_context.update_task()
-            raise
-        formatted_exc = format_exception(__exc_type, __exc_value, __traceback)
-        if isinstance(__exc_value, PausedError):
-            self.current_stage["status"] = "paused"
-            if self.current_stage["task"]:
-                task = self.current_stage["task"]
-                self.current_stage["error"] = (
-                    f"Stage {self.current_stage['name']} paused by pause in task with id {task.key}: {task.error}"
-                )
-            else:
-                self.current_stage["error"] = f"Stage paused by pause error raised in stage: {formatted_exc}"
-            self.stages_stack.pop()
-            await self.request_context.update_task()
-            raise
-        if isinstance(__exc_value, CompensatedSuccess):
-            self.current_stage["status"] = "failed"
-            self.current_stage["error"] = f"Stage failed (and succesfully compensated) by error: {formatted_exc}"
-            self.stages_stack.pop()
-            await self.request_context.update_task()
-            raise
-        if isinstance(__exc_value, CompensatedError):
-            # if a compensation error occurred for some stage,
-            # we pause the current task to investigate manually
-            self.current_stage["status"] = "failed"
-            self.current_stage["error"] = f"Stage (and compensation error occurs) failed by error: {formatted_exc}"
-            self.stages_stack.pop()
-            await self.request_context.update_task()
-            raise PausedError(self.current_stage["error"]) from __exc_value
-        if isinstance(__exc_value, Exception):
-            self.current_stage["status"] = "failed"
-            self.current_stage["error"] = f"Stage failed by error: {formatted_exc}"
-            self.stages_stack.pop()
-            await self.request_context.update_task()
-            raise
-        if __exc_type is None:
-            self.current_stage["status"] = "completed"
-            self.stages_stack.pop()
-            await self.request_context.update_task()
+                raise
+            formatted_exc = format_exception(__exc_type, __exc_value, __traceback)
+            if isinstance(__exc_value, PausedError):
+                self.current_stage["status"] = "paused"
+                if self.current_stage["task"]:
+                    task = self.current_stage["task"]
+                    self.current_stage["error"] = (
+                        f"Stage {self.current_stage['name']} paused by pause in task with id {task.key}: {task.error}"
+                    )
+                else:
+                    self.current_stage["error"] = f"Stage paused by pause error raised in stage: {formatted_exc}"
+                self.stages_stack.pop()
+                await self.request_context.update_task()
+                raise
+            if isinstance(__exc_value, CompensatedSuccess):
+                self.current_stage["status"] = "failed"
+                self.current_stage["error"] = f"Stage failed (and succesfully compensated) by error: {formatted_exc}"
+                self.stages_stack.pop()
+                await self.request_context.update_task()
+                raise
+            if isinstance(__exc_value, CompensatedError):
+                # if a compensation error occurred for some stage,
+                # we pause the current task to investigate manually
+                self.current_stage["status"] = "failed"
+                self.current_stage["error"] = f"Stage (and compensation error occurs) failed by error: {formatted_exc}"
+                self.stages_stack.pop()
+                await self.request_context.update_task()
+                raise PausedError(self.current_stage["error"]) from __exc_value
+            if isinstance(__exc_value, Exception):
+                self.current_stage["status"] = "failed"
+                self.current_stage["error"] = f"Stage failed by error: {formatted_exc}"
+                self.stages_stack.pop()
+                await self.request_context.update_task()
+                raise
+            if __exc_type is None:
+                self.current_stage["status"] = "completed"
+                self.stages_stack.pop()
+                await self.request_context.update_task()
 
     @classmethod
     async def run_func_as_stage(
